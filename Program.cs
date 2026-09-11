@@ -1,7 +1,9 @@
 // ============================================================
-// Job Classifier — Serviço RPC em .NET (gRPC + gRPC-Web)
-// Mesmos contratos proto do serviço Node (job-classifier-rpc),
-// mesma base MongoDB — sidecar de comparação na porta 8010.
+// Job Classifier — Serviço RPC PRIMÁRIO em .NET (gRPC + gRPC-Web)
+// Mesmos contratos proto (job.v1) e mesmo MongoDB dos demais serviços.
+// Portas: 8000 = HTTP/1.1 (healthz + gRPC-Web p/ navegador)
+//         8003 = h2c/HTTP/2 puro (gRPC nativo — grpcurl, backends)
+// Decisões de protocolo detalhadas no README.md deste projeto.
 // ============================================================
 using JobClassifier.Services;
 using Grpc.AspNetCore.Web;
@@ -12,11 +14,18 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Porta via PORT (padrão 8000 — serviço primário desde a promoção do sidecar)
 var port = int.TryParse(Environment.GetEnvironmentVariable("PORT"), out var p) ? p : 8000;
+// Porta para gRPC NATIVO em claro (h2c, HTTP/2 prior-knowledge) - grpcurl, clientes backend
+var h2cPort = int.TryParse(Environment.GetEnvironmentVariable("H2C_PORT"), out var hp) ? hp : 8003;
 
 builder.WebHost.ConfigureKestrel(o =>
 {
-    // HTTP/1.1 (healthz + gRPC-Web) e HTTP/2 (gRPC nativo) na mesma porta
-    o.ListenAnyIP(port, listen => listen.Protocols = HttpProtocols.Http1AndHttp2);
+    // :8000 - HTTP/1.1 apenas: /healthz + gRPC-Web do navegador (nao precisa de HTTP/2).
+    // Elimina o warning de ALPN/TLS (inofensivo, mas ruido na demo).
+    o.ListenAnyIP(port, listen => listen.Protocols = HttpProtocols.Http1);
+
+    // :8003 - HTTP/2 puro em texto claro (h2c, prior knowledge): gRPC nativo sem TLS.
+    // Endpoint EXCLUSIVO HTTP/2 e a forma suportada de h2c no Kestrel.
+    o.ListenAnyIP(h2cPort, listen => listen.Protocols = HttpProtocols.Http2);
 });
 
 builder.Services.AddGrpc(o => o.EnableDetailedErrors = true);
