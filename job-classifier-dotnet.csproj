@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>JobClassifier</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Contratos compartilhados: mesma fonte de verdade do projeto inteiro.
+         ProtoRoot aponta para ../proto para resolver os imports cruzados
+         (scraping.proto importa job/v1/vagas.proto). -->
+    <Protobuf Include="..\proto\job\v1\**\*.proto" GrpcServices="Both" ProtoRoot="..\proto" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" Version="2.83.0" />
+    <PackageReference Include="Grpc.AspNetCore.Web" Version="2.83.0" />
+    <PackageReference Include="MongoDB.Driver" Version="3.11.2" />
+  </ItemGroup>
+
+</Project>
