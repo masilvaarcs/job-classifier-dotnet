@@ -353,38 +353,52 @@ public class VagasGrpcService : Job.V1.VagaService.VagaServiceBase
             .FirstOrDefaultAsync();
         var proximoId = maxDoc != null ? maxDoc.GetValue("id", 0).ToInt64() + 1 : 1;
 
-        foreach (var v in request.Vagas)
+        // Lotes para não estourar limites do Atlas (payload/ops por batch).
+        const int LOTE = 1000;
+
+        for (var inicio = 0; inicio < request.Vagas.Count; inicio += LOTE)
         {
-            var score = ScoreService.CalcularScore(v.Titulo, v.Descricao ?? "", v.Empresa ?? "");
-            var now = DateTime.UtcNow;
+            var lote = request.Vagas.Skip(inicio).Take(LOTE);
+            var ops = new List<WriteModel<BsonDocument>>();
 
-            var update = Builders<BsonDocument>.Update
-                .Set("titulo", v.Titulo)
-                .Set("empresa", v.Empresa ?? "")
-                .Set("localizacao", v.Localizacao ?? "")
-                .Set("salario", v.Salario ?? "")
-                .Set("modalidade", v.Modalidade ?? "")
-                .Set("publicado", v.Publicado ?? "")
-                .Set("data_publicacao", string.IsNullOrEmpty(v.DataPublicacao) ? (BsonValue?)BsonNull.Value : DateTime.Parse(v.DataPublicacao).ToUniversalTime())
-                .Set("tipo_trabalho", string.IsNullOrEmpty(v.TipoTrabalho) ? "NAO IDENTIFICADO" : v.TipoTrabalho)
-                .Set("descricao", v.Descricao ?? "")
-                .Set("updated_at", now)
-                .Set("data_coleta", now)
-                .SetOnInsert("id", proximoId++)
-                .SetOnInsert("link", v.Link)
-                .SetOnInsert("job_id", v.JobId ?? "")
-                .SetOnInsert("plataforma", v.Plataforma)
-                .SetOnInsert("created_at", now)
-                .SetOnInsert("status_usuario", "pendente")
-                .SetOnInsert("ignorada", false)
-                .SetOnInsert("pra_mim", false)
-                .SetOnInsert("score_compatibilidade", score)
-                .SetOnInsert("data_verificacao", BsonNull.Value)
-                .SetOnInsert("ativa", true)
-                .SetOnInsert("notas", "");
+            foreach (var v in lote)
+            {
+                var score = ScoreService.CalcularScore(v.Titulo, v.Descricao ?? "", v.Empresa ?? "");
+                var now = DateTime.UtcNow;
 
-            var result = await Col.UpdateOneAsync(fb.Eq("link", v.Link), update, new UpdateOptions { IsUpsert = true });
-            if (result.UpsertedId != null) importadas++; else atualizadas++;
+                var update = Builders<BsonDocument>.Update
+                    .Set("titulo", v.Titulo)
+                    .Set("empresa", v.Empresa ?? "")
+                    .Set("localizacao", v.Localizacao ?? "")
+                    .Set("salario", v.Salario ?? "")
+                    .Set("modalidade", v.Modalidade ?? "")
+                    .Set("publicado", v.Publicado ?? "")
+                    .Set("data_publicacao", string.IsNullOrEmpty(v.DataPublicacao) ? (BsonValue?)BsonNull.Value : DateTime.Parse(v.DataPublicacao).ToUniversalTime())
+                    .Set("tipo_trabalho", string.IsNullOrEmpty(v.TipoTrabalho) ? "NAO IDENTIFICADO" : v.TipoTrabalho)
+                    .Set("descricao", v.Descricao ?? "")
+                    .Set("updated_at", now)
+                    .Set("data_coleta", now)
+                    .SetOnInsert("id", proximoId++)
+                    .SetOnInsert("link", v.Link)
+                    .SetOnInsert("job_id", v.JobId ?? "")
+                    .SetOnInsert("plataforma", v.Plataforma)
+                    .SetOnInsert("created_at", now)
+                    .SetOnInsert("status_usuario", "pendente")
+                    .SetOnInsert("ignorada", false)
+                    .SetOnInsert("pra_mim", false)
+                    .SetOnInsert("score_compatibilidade", score)
+                    .SetOnInsert("data_verificacao", BsonNull.Value)
+                    .SetOnInsert("ativa", true)
+                    .SetOnInsert("notas", "");
+
+                ops.Add(new UpdateOneModel<BsonDocument>(fb.Eq("link", v.Link), update) { IsUpsert = true });
+            }
+
+            if (ops.Count == 0) continue;
+
+            var result = await Col.BulkWriteAsync(ops, new BulkWriteOptions { IsOrdered = false });
+            importadas += result.Upserts.Count;
+            atualizadas += (int)result.MatchedCount;
         }
 
         return new ImportVagasResponse { Importadas = importadas, Atualizadas = atualizadas };
